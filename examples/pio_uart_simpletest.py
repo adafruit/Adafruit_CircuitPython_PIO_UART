@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Unlicense
 
+import board
 import adafruit_pio_uart
 
 uart = adafruit_pio_uart.UART(board.TX, board.RX)
