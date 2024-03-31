@@ -95,9 +95,15 @@ Or the following command to update an existing version:
 Usage Example
 =============
 
-.. literalinclude:: ../examples/pio_uart_simpletest.py
-    :caption: examples/pio_uart_simpletest.py
-    :linenos:
+.. code-block:: python
+
+    import board
+    import adafruit_pio_uart
+
+    uart = adafruit_pio_uart.UART(board.TX, board.RX)
+
+    uart.write(b"\x00")
+    print(uart.read(1))
 
 
 Documentation
