@@ -24,14 +24,10 @@ Table of Contents
 .. toctree::
     :caption: Tutorials
 
-.. todo:: Add any Learn guide links here. If there are none, then simply delete this todo and leave
-    the toctree above for use later.
-
 .. toctree::
     :caption: Related Products
 
-.. todo:: Add any product links here. If there are none, then simply delete this todo and leave
-    the toctree above for use later.
+    Adafruit Raspberry Pi RP2040 Pico products <https://www.adafruit.com/category/875>
 
 .. toctree::
     :caption: Other Links
