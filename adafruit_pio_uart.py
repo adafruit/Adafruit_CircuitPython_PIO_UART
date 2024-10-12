@@ -184,6 +184,8 @@ class UART:
         else:
             buf = bytearray(n)
         n = self.readinto(buf)
+        if n == 0:
+            return None
         if n < len(buf):
             return buf[:n]
         return buf
