@@ -33,7 +33,7 @@ class UART:
     Parity = busio.UART.Parity
 
     def __init__(
-        self, tx=None, rx=None, baudrate=9600, bits=8, parity=None, stop=1, timeout=1
+        self, tx=None, rx=None, baudrate=9600, bits=8, parity=None, stop=1, timeout=1, cts=None, rts=None
     ):  # pylint: disable=invalid-name, too-many-arguments
         self.bitcount = bits + (1 if parity else 0)
         self.bits = bits
@@ -43,72 +43,159 @@ class UART:
         self._timeout = timeout
         self.rx_pio = None
         if rx:
-            # Minimum viable 8n1 UART receiver. Wait for the start bit, then sample 8 bits
-            # with the correct timing.
-            # IN pin 0 is mapped to the GPIO used as UART RX.
-            # Autopush must be enabled, with a threshold of 8.
+            if rts:    
+                # Fleshed-out 8n1 UART receiver with hardware flow control handling
+                # framing errors and break conditions more gracefully.
+                # Wait for the start bit whilst updating rts with the FIFO level
+                # then sample 8 bits with the correct timing.
+                # IN pin 0 and JMP pin are both mapped to the GPIO used as UART RX.
+                # OUT pin 0 is mapped to the GPIO used as UART RTS# (Request To Send).
 
-            # Line by line explanation:
-            # * Wait for start bit
-            # * Preload bit counter, delay until eye of first data bit
-            # * Loop 8 times
-            # * Sample data
-            # * Each iteration is 8 cycles
-            rx_code = adafruit_pioasm.assemble(
-                ".program uart_rx_mini\n"
-                + "start:\n"
-                + "  wait 0 pin 0\n"
-                + f"  set x, {self.bitcount - 1} [10]\n"
-                + "bitloop:\n"
-                + "  in pins, 1\n"
-                + "  jmp x-- bitloop [6]\n"
-                + "  jmp pin good_stop\n"
-                + "  wait 1 pin 0\n"  # Skip IRQ
-                + "  jmp start\n"
-                + "good_stop:\n"
-                + "  push\n"
-            )
-            self.rx_pio = rp2pio.StateMachine(
-                rx_code,
-                first_in_pin=rx,
-                jmp_pin=rx,
-                frequency=8 * baudrate,
-                auto_push=False,
-                push_threshold=self.bitcount,
-            )
+                # Line by line explanation:
+                # * Update rts pin with status of fifo level (high when full).
+                # * Loop back to start whilst waiting for the start bit (low).
+                # * Preload bit counter, then delay until eye of first data bit.
+                # * Shift data bit into ISR
+                # * Loop bitcount times, each loop iteration is 8 cycles.
+                # * Jump to good_stop if there's a stop bit (high)
+                # * otherwise wait for line to return to idle state.
+                # * Don't push data if we didn't see good framing and start again.
+                # * Push valid data and return to the start.
+                rx_code = adafruit_pioasm.assemble(
+                    ".program uart_rx_mini\n"
+                    + "start:\n"
+                    + "  mov pins !status\n"
+                    + "  jmp pin start\n"
+                    + f"  set x, {self.bitcount - 1} [10]\n"
+                    + "bitloop:\n"
+                    + "  in pins, 1\n"
+                    + "  jmp x-- bitloop [6]\n"
+                    + "  jmp pin good_stop\n"
+                    + "  wait 1 pin 0\n"  # Skip IRQ
+                    + "  jmp start\n"
+                    + "good_stop:\n"
+                    + "  push\n"
+                )
+
+                # mov_status_n is set to 7 allowing 2 further
+                # entries (8 in the joined FIFO and one in ISR).
+                self.rx_pio = rp2pio.StateMachine(
+                    rx_code,
+                    first_in_pin=rx,
+                    jmp_pin=rx,
+                    frequency=8 * baudrate,
+                    auto_push=False,
+                    push_threshold=self.bitcount,
+                    first_out_pin=rts,
+                    mov_status_type='rxfifo',
+                    mov_status_n=7,
+                )
+            else:
+                # Fleshed-out 8n1 UART receiver which handles
+                # framing errors and break conditions more gracefully.
+                # IN pin 0 is mapped to the GPIO used as UART RX.
+
+                # Line by line explanation:
+                # * Wait for start bit
+                # * Preload bit counter, then delay until eye of first data bit.
+                # * Shift data bit into ISR
+                # * Loop bitcount times, each loop iteration is 8 cycles.
+                # * Jump to good_stop if there's a stop bit (high)
+                # * otherwise wait for line to return to idle state.
+                # * Don't push data if we didn't see good framing and start again.
+                # * Push valid data and return to the start.
+                rx_code = adafruit_pioasm.assemble(
+                    ".program uart_rx_mini\n"
+                    + "start:\n"
+                    + "  wait 0 pin 0\n"
+                    + f"  set x, {self.bitcount - 1} [10]\n"
+                    + "bitloop:\n"
+                    + "  in pins, 1\n"
+                    + "  jmp x-- bitloop [6]\n"
+                    + "  jmp pin good_stop\n"
+                    + "  wait 1 pin 0\n"  # Skip IRQ
+                    + "  jmp start\n"
+                    + "good_stop:\n"
+                    + "  push\n"
+                )
+                self.rx_pio = rp2pio.StateMachine(
+                    rx_code,
+                    first_in_pin=rx,
+                    jmp_pin=rx,
+                    frequency=8 * baudrate,
+                    auto_push=False,
+                    push_threshold=self.bitcount,
+                )
 
         self.tx_pio = None
         if tx:
             stop_delay = stop * 8 - 1
-            # An 8n1 UART transmit program.
-            # OUT pin 0 and side-set pin 0 are both mapped to UART TX pin.
+            if cts:
+                # An 8n1 UART transmit program with hardware flow control
+                # OUT pin 0 and side-set pin 0 are both mapped to UART TX pin.
+                # IN pin 0 is mapped to GPIO pin used as CTS# (Clear To Send),
 
-            # Line by line explanation:
-            # * Assert stop bit, or stall with line in idle state
-            # * Preload bit counter, assert start bit for 8 clocks
-            # * This loop will run 8 times (8n1 UART)
-            # * Shift 1 bit from OSR to the first OUT pin
-            # * Each loop iteration is 8 cycles.
-            tx_code = adafruit_pioasm.Program(
-                ".program uart_tx\n"
-                + ".side_set 1 opt\n"
-                + f"  pull side 1 [{stop_delay}]\n"
-                + f"  set x, {self.bitcount - 1} side 0 [7]\n"
-                + "bitloop:\n"
-                + "  out pins, 1\n"
-                + "  jmp x-- bitloop [6]\n"
-            )
-            self.tx_pio = rp2pio.StateMachine(
-                tx_code.assembled,
-                first_out_pin=tx,
-                first_sideset_pin=tx,
-                frequency=8 * baudrate,
-                initial_sideset_pin_state=1,
-                initial_sideset_pin_direction=1,
-                initial_out_pin_state=1,
-                initial_out_pin_direction=1,
-                **tx_code.pio_kwargs,
-            )
+                # Line by line explanation:
+                # * Assert stop bit, or stall with line in idle state
+                # * Wait for CTS# before transmitting 
+                # * Preload bit counter, assert start bit for 8 clocks
+                # * This loop will run 8 times (8n1 UART)
+                # * Shift 1 bit from OSR to the first OUT pin
+                # * Each loop iteration is 8 cycles.
+                tx_code = adafruit_pioasm.Program(
+                    ".program uart_tx\n"
+                    + ".side_set 1 opt\n"
+                    + f"  pull side 1 [{stop_delay}]\n"
+                    + "wait 0 pin 0\n"
+                    + f"  set x, {self.bitcount - 1} side 0 [7]\n"
+                    + "bitloop:\n"
+                    + "  out pins, 1\n"
+                    + "  jmp x-- bitloop [6]\n"
+                )
+                self.tx_pio = rp2pio.StateMachine(
+                    tx_code.assembled,
+                    first_out_pin=tx,
+                    first_sideset_pin=tx,
+                    frequency=8 * baudrate,
+                    initial_sideset_pin_state=1,
+                    initial_sideset_pin_direction=1,
+                    initial_out_pin_state=1,
+                    initial_out_pin_direction=1,
+                    first_in_pin=cts,
+                    pull_in_pin_up=True,
+                    wait_for_txstall=False,
+                    **tx_code.pio_kwargs,
+                )
+            else:
+                # An 8n1 UART transmit program.
+                # OUT pin 0 and side-set pin 0 are both mapped to UART TX pin.
+
+                # Line by line explanation:
+                # * Assert stop bit, or stall with line in idle state
+                # * Preload bit counter, assert start bit for 8 clocks
+                # * This loop will run 8 times (8n1 UART)
+                # * Shift 1 bit from OSR to the first OUT pin
+                # * Each loop iteration is 8 cycles.
+                tx_code = adafruit_pioasm.Program(
+                    ".program uart_tx\n"
+                    + ".side_set 1 opt\n"
+                    + f"  pull side 1 [{stop_delay}]\n"
+                    + f"  set x, {self.bitcount - 1} side 0 [7]\n"
+                    + "bitloop:\n"
+                    + "  out pins, 1\n"
+                    + "  jmp x-- bitloop [6]\n"
+                )
+                self.tx_pio = rp2pio.StateMachine(
+                    tx_code.assembled,
+                    first_out_pin=tx,
+                    first_sideset_pin=tx,
+                    frequency=8 * baudrate,
+                    initial_sideset_pin_state=1,
+                    initial_sideset_pin_direction=1,
+                    initial_out_pin_state=1,
+                    initial_out_pin_direction=1,
+                    **tx_code.pio_kwargs,
+                )
 
     def deinit(self):
         """De-initialize the UART object."""
