@@ -33,7 +33,16 @@ class UART:
     Parity = busio.UART.Parity
 
     def __init__(
-        self, tx=None, rx=None, baudrate=9600, bits=8, parity=None, stop=1, timeout=1, cts=None, rts=None
+        self,
+        tx=None,
+        rx=None,
+        baudrate=9600,
+        bits=8,
+        parity=None,
+        stop=1,
+        timeout=1,
+        cts=None,
+        rts=None,
     ):  # pylint: disable=invalid-name, too-many-arguments
         self.bitcount = bits + (1 if parity else 0)
         self.bits = bits
