@@ -43,7 +43,7 @@ class UART:
         self._timeout = timeout
         self.rx_pio = None
         if rx:
-            if rts:    
+            if rts: 
                 # Fleshed-out 8n1 UART receiver with hardware flow control handling
                 # framing errors and break conditions more gracefully.
                 # Wait for the start bit whilst updating rts with the FIFO level
@@ -87,7 +87,7 @@ class UART:
                     auto_push=False,
                     push_threshold=self.bitcount,
                     first_out_pin=rts,
-                    mov_status_type='rxfifo',
+                    mov_status_type="rxfifo",
                     mov_status_n=7,
                 )
             else:
@@ -137,7 +137,7 @@ class UART:
 
                 # Line by line explanation:
                 # * Assert stop bit, or stall with line in idle state
-                # * Wait for CTS# before transmitting 
+                # * Wait for CTS# before transmitting
                 # * Preload bit counter, assert start bit for 8 clocks
                 # * This loop will run 8 times (8n1 UART)
                 # * Shift 1 bit from OSR to the first OUT pin
