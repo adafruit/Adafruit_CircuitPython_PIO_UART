@@ -43,7 +43,7 @@ class UART:
         self._timeout = timeout
         self.rx_pio = None
         if rx:
-            if rts: 
+            if rts:
                 # Fleshed-out 8n1 UART receiver with hardware flow control handling
                 # framing errors and break conditions more gracefully.
                 # Wait for the start bit whilst updating rts with the FIFO level
