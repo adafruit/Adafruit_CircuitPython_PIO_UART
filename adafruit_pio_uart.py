@@ -43,7 +43,7 @@ class UART:
         timeout=1,
         cts=None,
         rts=None,
-    ):  # pylint: disable=invalid-name, too-many-arguments
+    ):
         self.bitcount = bits + (1 if parity else 0)
         self.bits = bits
         self.parity = parity
@@ -291,8 +291,8 @@ class UART:
         # Compute parity if we need to
         if self.parity:
             if self.bitcount > 8:
-                a = array.array("H")  # pylint: disable=invalid-name
-            for i, v in enumerate(buf):  # pylint: disable=invalid-name
+                a = array.array("H")
+            for i, v in enumerate(buf):
                 a.append(v)
                 ones = 0
                 for pos in range(self.bitcount - 1):
