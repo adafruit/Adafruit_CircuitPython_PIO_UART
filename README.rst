@@ -3,7 +3,7 @@ Introduction
 
 
 .. image:: https://readthedocs.org/projects/adafruit-circuitpython-pio-uart/badge/?version=latest
-    :target: https://docs.circuitpython.org/projects/pio_uart/en/latest/
+    :target: https://docs.circuitpython.org/projects/pio-uart/en/latest/
     :alt: Documentation Status
 
 
